@@ -1,4 +1,7 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+# SOURCE:
+# https://github.com/jamf/MakeMeAnAdmin
 
 ###############################################
 # This script will provide temporary admin    #
@@ -14,74 +17,93 @@
 # restarts their computer.                    #
 ###############################################
 
-#############################################
-# find the logged in user and let them know #
-#############################################
+# activate verbose standard output (stdout)
+set -v
+# activate debugging (execution shown)
+set -x
 
-currentUser=$(who | awk '/console/{print $1}')
-echo $currentUser
+# logs (DEBUGGING ONLY -- disable as it stores params creds on host machine)
+# log_time=$(date +%Y%m%d_%H%M%S)
+# log_file="/tmp/$(basename "$0" | cut -d. -f1)_$log_time.log" # LOCAL only
+# log_file="/tmp/make_admin_$log_time.log"
+# exec &> >(tee -a "$log_file")   # redirect standard error (stderr) and stdout to log
+# exec 1>> >(tee -a "$log_file")	# redirect stdout to log
 
-osascript -e 'display dialog "You now have administrative rights for 30 minutes. DO NOT ABUSE THIS PRIVILEGE..." buttons {"Make me an admin, please"} default button 1'
+# Working directory
+# script_dir=$(cd "$(dirname "$0")" && pwd)
 
-#########################################################
-# write a daemon that will let you remove the privilege #
-# with another script and chmod/chown to make 			#
-# sure it'll run, then load the daemon					#
-#########################################################
+# Set $IFS to eliminate whitespace in pathnames
+IFS="$(printf '\n\t')"
 
-#Create the plist
-sudo defaults write /Library/LaunchDaemons/removeAdmin.plist Label -string "removeAdmin"
+# Current user
+# Param $3 is logged in user in JSS
+logged_in_user=$3
+# logged_in_user=$(logname) # posix alternative to /dev/console
 
-#Add program argument to have it run the update script
-sudo defaults write /Library/LaunchDaemons/removeAdmin.plist ProgramArguments -array -string /bin/sh -string "/Library/Application Support/JAMF/removeAdminRights.sh"
+osascript -e 'display dialog "You will have administrative rights for 30 minutes. Continue? " buttons {"Cancel","Make me an admin, please"} default button 1'
+if [[ $? -eq 1 ]]; then
+    echo "Ubermensch cancelled "
+	set +v
+	set +x
+	unset IFS
+    exit 1
+fi
 
-#Set the run inverval to run every 7 days
-sudo defaults write /Library/LaunchDaemons/removeAdmin.plist StartInterval -integer 1800
+# write a daemon that will let you remove the privilege with another script and chmod/chown to make sure it'll run, then load the daemon
+# Create the plist
+defaults write /Library/LaunchDaemons/remove_admin.plist Label -string "remove_admin"
 
-#Set run at load
-sudo defaults write /Library/LaunchDaemons/removeAdmin.plist RunAtLoad -boolean yes
+# Add program argument to have it run the update script
+defaults write /Library/LaunchDaemons/remove_admin.plist ProgramArguments -array -string /bin/bash -string "/Library/Application Support/JAMF/remove_admin_rights.sh"
 
-#Set ownership
-sudo chown root:wheel /Library/LaunchDaemons/removeAdmin.plist
-sudo chmod 644 /Library/LaunchDaemons/removeAdmin.plist
+# Set the run inverval to run every 7 days
+defaults write /Library/LaunchDaemons/remove_admin.plist StartInterval -integer 1800
 
-#Load the daemon 
-launchctl load /Library/LaunchDaemons/removeAdmin.plist
+# Set run at load
+defaults write /Library/LaunchDaemons/remove_admin.plist RunAtLoad -boolean yes
+
+# Set ownership
+chown root:wheel /Library/LaunchDaemons/remove_admin.plist
+chmod 644 /Library/LaunchDaemons/remove_admin.plist
+
+# Load the daemon
+launchctl load /Library/LaunchDaemons/remove_admin.plist
 sleep 10
 
-#########################
-# make file for removal #
-#########################
-
-if [ ! -d /private/var/userToRemove ]; then
-	mkdir /private/var/userToRemove
-	echo $currentUser >> /private/var/userToRemove/user
-	else
-		echo $currentUser >> /private/var/userToRemove/user
+# Make file for removal
+if [[ ! -d '/private/var/user_to_remove' ]]; then
+	mkdir -p '/private/var/user_to_remove'
+	echo $logged_in_user >> '/private/var/user_to_remove/user'
+else
+    echo $logged_in_user >> '/private/var/user_to_remove/user'
 fi
 
-##################################
-# give the user admin privileges #
-##################################
+# Give the user admin privileges
+dseditgroup -o edit -a $logged_in_user -t user admin
 
-/usr/sbin/dseditgroup -o edit -a $currentUser -t user admin
-
-########################################
-# write a script for the launch daemon #
-# to run to demote the user back and   #
-# then pull logs of what the user did. #
-########################################
-
-cat << 'EOF' > /Library/Application\ Support/JAMF/removeAdminRights.sh
-if [[ -f /private/var/userToRemove/user ]]; then
-	userToRemove=$(cat /private/var/userToRemove/user)
-	echo "Removing $userToRemove's admin privileges"
-	/usr/sbin/dseditgroup -o edit -d $userToRemove -t user admin
-	rm -f /private/var/userToRemove/user
-	launchctl unload /Library/LaunchDaemons/removeAdmin.plist
-	rm /Library/LaunchDaemons/removeAdmin.plist
-	log collect --last 30m --output /private/var/userToRemove/$userToRemove.logarchive
+# heredoc for the launch daemon to run to demote the user back and then pull logs of what the user did.
+cat << 'EOF' > /Library/Application\ Support/JAMF/remove_admin_rights.sh
+if [[ -f '/private/var/user_to_remove/user' ]]; then
+	user_to_remove=$(cat /private/var/user_to_remove/user)
+	echo "Removing $user_to_remove's admin privileges"
+	dseditgroup -o edit -d $user_to_remove -t user admin
+	rm -f '/private/var/user_to_remove/user'
+	launchctl unload '/Library/LaunchDaemons/remove_admin.plist'
+	rm '/Library/LaunchDaemons/remove_admin.plist'
+	log collect --last 30m --output /private/var/user_to_remove/$user_to_remove.logarchive
 fi
 EOF
+
+# Reload System Preferences to remove Profiles pane
+if [[ ! -z $(pgrep 'System Preferences') ]]; then
+    pkill -1 'System Preferences'
+    open '/Applications/System Preferences.app'
+fi
+
+# deactivate verbose and debugging stdout
+set +v
+set +x
+
+unset IFS
 
 exit 0
