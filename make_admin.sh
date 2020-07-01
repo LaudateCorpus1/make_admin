@@ -94,7 +94,7 @@ if [[ -f '/private/var/user_to_remove/user' ]]; then
 fi
 EOF
 
-# Reload System Preferences to remove Profiles pane
+# Reload System Preferences to refresh user status
 if [[ ! -z $(pgrep 'System Preferences') ]]; then
     pkill -1 'System Preferences'
     open '/Applications/System Preferences.app'
