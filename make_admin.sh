@@ -90,7 +90,7 @@ if [[ -f '/private/var/user_to_remove/user' ]]; then
 	rm -f '/private/var/user_to_remove/user'
 	launchctl unload '/Library/LaunchDaemons/remove_admin.plist'
 	rm '/Library/LaunchDaemons/remove_admin.plist'
-	log collect --last 30m --output /private/var/user_to_remove/$user_to_remove.logarchive
+	log collect --last 30m --output /private/var/user_to_remove/${user_to_remove}_$(date +%Y%m%d_%H%M%S).logarchive
 fi
 EOF
 
